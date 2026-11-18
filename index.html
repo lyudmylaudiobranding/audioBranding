@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Свойства звука: высота, тембр, громкость</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#faf9f6;--fg:#1d1d1b;--muted:#6b6b66;--card:#ffffff;--line:#dcdcd4;--accent:#c2410c;--wave:#1d4ed8;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161615;--fg:#f1f0ea;--muted:#a3a39b;--card:#212120;--line:#3a3a37;--accent:#fb923c;--wave:#60a5fa;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#161615;--fg:#f1f0ea;--muted:#a3a39b;--card:#212120;--line:#3a3a37;--accent:#fb923c;--wave:#60a5fa;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:860px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:1.5rem;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:12px 0}
+.card h2{font-size:1.05rem;margin:0 0 6px}
+.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+input[type=range]{flex:1;min-width:160px;accent-color:var(--accent)}
+.val{min-width:120px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.note{color:var(--muted);font-size:.9rem;margin:6px 0 0}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:8px;padding:8px 14px}
+button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+#play{font-weight:700;padding:10px 20px}
+.types{display:flex;gap:8px;flex-wrap:wrap}
+canvas{width:100%;height:170px;display:block;background:var(--card);border:1px solid var(--line);border-radius:12px}
+.lab{font-size:.85rem;color:var(--muted);margin:10px 0 4px}
+</style>
+</head>
+<body>
+<main>
+<h1>Свойства звука</h1>
+<p class="sub">Высота, тембр, громкость: слышим и видим одновременно</p>
+
+<div class="card row">
+  <button id="play">▶ Включить звук</button>
+  <span class="note" style="margin:0">Начните с небольшой громкости в колонках.</span>
+</div>
+
+<div class="lab">Форма волны (окно 20 мс)</div>
+<canvas id="scope"></canvas>
+<div class="lab">Спектр (0–8000 Гц): из каких гармоник состоит звук</div>
+<canvas id="spec"></canvas>
+
+<div class="card">
+  <h2>Высота: частота колебаний</h2>
+  <div class="row"><input id="freq" type="range" min="0" max="1" step="0.001" value="0.25"><span class="val" id="freqV"></span></div>
+  <p class="note">Выше частота: больше колебаний в окне и спектр сдвигается вправо. Для разговора: низкий голос в рекламе авто и финансов, глиссандо вверх в THX.</p>
+</div>
+
+<div class="card">
+  <h2>Тембр: состав гармоник</h2>
+  <div class="types" id="types"></div>
+  <p class="note" id="timbreNote"></p>
+</div>
+
+<div class="card">
+  <h2>Громкость: амплитуда</h2>
+  <div class="row"><input id="vol" type="range" min="-40" max="0" step="1" value="-18"><span class="val" id="volV"></span></div>
+  <p class="note">Амплитуда растёт, форма и высота не меняются. Каждые −6 дБ уменьшают амплитуду вдвое. Для разговора: «война громкости» и статья 14 закона «О рекламе».</p>
+</div>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const TYPES={
+  sine:{n:'Синус',d:'Чистый тон: одна гармоника. Так звучит камертон, а в бренд-звуке это «стерильный» сигнал.'},
+  triangle:{n:'Треугольник',d:'Мягкий, слегка «пустой» тембр: нечётные гармоники, быстро затухающие.'},
+  square:{n:'Прямоугольник',d:'Резкий, «цифровой» тембр: нечётные гармоники, спадающие медленно.'},
+  sawtooth:{n:'Пила',d:'Яркий, «жужжащий» тембр: все гармоники. Богатый спектр воспринимается как «плотный» звук.'}
+};
+const st={x:0.25,db:-18,type:'sine'};
+let ctx=null,osc=null,gain=null,playing=false;
+const freq=()=>100*Math.pow(20,st.x);
+const lin=()=>Math.pow(10,st.db/20);
+const NN=['до','до♯','ре','ре♯','ми','фа','фа♯','соль','соль♯','ля','ля♯','си'];
+function noteName(f){const n=Math.round(12*Math.log2(f/440))+69;return NN[((n%12)+12)%12]+(Math.floor(n/12)-1)}
+
+function wave(t,p){p=p%1;
+  if(t==='sine')return Math.sin(2*Math.PI*p);
+  if(t==='square')return p<.5?1:-1;
+  if(t==='sawtooth')return 2*p-1;
+  return 1-4*Math.abs(p-.5)}
+function harm(t,n){
+  if(t==='sine')return n===1?1:0;
+  if(t==='sawtooth')return 1/n;
+  if(n%2===0)return 0;
+  return t==='square'?1/n:1/(n*n)*(Math.PI*Math.PI/8)}
+
+function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
+function prep(c){const r=window.devicePixelRatio||1,w=c.clientWidth,h=c.clientHeight;
+  if(c.width!==Math.round(w*r)){c.width=Math.round(w*r);c.height=Math.round(h*r)}
+  const g=c.getContext('2d');g.setTransform(r,0,0,r,0,0);g.clearRect(0,0,w,h);return[g,w,h]}
+
+function drawScope(){
+  const [g,w,h]=prep($('scope'));const f=freq(),a=lin();
+  g.strokeStyle=css('--line');g.lineWidth=1;g.beginPath();g.moveTo(0,h/2);g.lineTo(w,h/2);g.stroke();
+  g.strokeStyle=css('--wave');g.lineWidth=2;g.beginPath();
+  for(let x=0;x<=w;x++){const t=x/w*0.02;const y=h/2-wave(st.type,f*t)*a*(h/2-8);x?g.lineTo(x,y):g.moveTo(x,y)}
+  g.stroke()}
+function drawSpec(){
+  const [g,w,h]=prep($('spec'));const f=freq(),a=lin(),MAX=8000;
+  g.fillStyle=css('--accent');
+  for(let n=1;n<=80;n++){const fr=n*f;if(fr>MAX)break;const m=harm(st.type,n);if(!m)continue;
+    const bh=m*a*(h-24),x=fr/MAX*w;g.fillRect(x-2,h-16-bh,4,bh)}
+  g.fillStyle=css('--muted');g.font='11px system-ui,sans-serif';
+  for(let k=0;k<=8;k++){const x=k/8*w;g.fillText(k+' кГц',Math.min(x,w-36),h-3)}}
+
+function update(){
+  $('freqV').textContent=Math.round(freq())+' Гц ('+noteName(freq())+')';
+  $('volV').textContent=st.db+' дБ';
+  $('timbreNote').textContent=TYPES[st.type].d;
+  drawScope();drawSpec();
+  if(playing&&ctx){osc.frequency.setTargetAtTime(freq(),ctx.currentTime,0.02);gain.gain.setTargetAtTime(0.3*lin(),ctx.currentTime,0.03);osc.type=st.type}}
+
+function start(){
+  try{ctx=ctx||new (window.AudioContext||window.webkitAudioContext)();ctx.resume();
+    osc=ctx.createOscillator();gain=ctx.createGain();osc.type=st.type;osc.frequency.value=freq();gain.gain.value=0;
+    osc.connect(gain);gain.connect(ctx.destination);osc.start();
+    gain.gain.setTargetAtTime(0.3*lin(),ctx.currentTime,0.03);playing=true}catch(e){playing=false}
+  $('play').textContent=playing?'■ Выключить звук':'Звук недоступен';$('play').classList.toggle('on',playing)}
+function stop(){const o=osc,g=gain;g.gain.setTargetAtTime(0,ctx.currentTime,0.03);setTimeout(()=>{try{o.stop()}catch(e){}},200);
+  playing=false;$('play').textContent='▶ Включить звук';$('play').classList.remove('on')}
+
+$('play').onclick=()=>playing?stop():start();
+$('freq').oninput=e=>{st.x=+e.target.value;update()};
+$('vol').oninput=e=>{st.db=+e.target.value;update()};
+const box=$('types');
+Object.keys(TYPES).forEach(k=>{const b=document.createElement('button');b.textContent=TYPES[k].n;b.dataset.k=k;
+  b.onclick=()=>{st.type=k;[...box.children].forEach(c=>c.classList.toggle('on',c.dataset.k===k));update()};box.appendChild(b)});
+box.firstChild.classList.add('on');
+addEventListener('resize',update);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',update);
+update();
+</script>
+</body>
+</html>
